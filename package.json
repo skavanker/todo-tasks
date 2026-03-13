@@ -1,0 +1,33 @@
+{
+  "name": "todo-tasks",
+  "version": "0.1.0",
+  "description": "CLI tool that syncs TODO.md files with Google Tasks",
+  "type": "module",
+  "bin": {
+    "todo-tasks": "./bin/cli.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "todo",
+    "google-tasks",
+    "markdown",
+    "cli",
+    "sync"
+  ],
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "googleapis": "^134.0.0",
+    "open": "^11.0.0"
+  }
+}
