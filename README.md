@@ -27,7 +27,7 @@ Due dates are managed in Google Tasks. When you set a date in Google Tasks, it s
 ## Install
 
 ```bash
-npm install -g todo-tasks
+npm install -g @skavanker/todo-tasks
 ```
 
 ## Setup
