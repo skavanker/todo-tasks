@@ -8,11 +8,16 @@ import * as api from './tasks-api.js';
 import { fuzzyMatch } from './fuzzy.js';
 
 /**
- * Derives a project name from the file path (uses parent folder name).
+ * Derives a project name from the file path.
+ * If file is in a docs/ folder, uses the grandparent (project root).
  */
 function projectName(filePath) {
   const dir = dirname(filePath);
-  return basename(dir);
+  const parent = basename(dir);
+  if (parent.toLowerCase() === 'docs') {
+    return basename(dirname(dir));
+  }
+  return parent;
 }
 
 function isNotFound(err) {
@@ -336,6 +341,11 @@ export async function sync(auth, filePath) {
       level: local?.level || 2,
       items: resultItems,
     });
+  }
+
+  // Safety check: don't wipe a non-empty file with empty results
+  if (resultSections.length === 0 && localSections.length > 0) {
+    throw new Error('Sync produced empty result from non-empty TODO.md — aborting to prevent data loss.');
   }
 
   // Write updated TODO.md
