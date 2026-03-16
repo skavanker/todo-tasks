@@ -29,7 +29,7 @@ export async function loadMapping(filePath) {
     return {
       file: resolve(filePath),
       lastSync: null,
-      lists: {},
+      sections: {},
     };
   }
 }
@@ -49,9 +49,9 @@ export async function saveMapping(filePath, mapping) {
  * Computes a hash for a task item (text + completed status).
  * Used to detect changes since last sync.
  */
-export function itemHash(text, completed) {
+export function itemHash(text, completed, notes, due) {
   return createHash('sha256')
-    .update(`${text}:${completed}`)
+    .update(`${text}:${completed}:${notes || ''}:${due || ''}`)
     .digest('hex')
     .slice(0, 8);
 }

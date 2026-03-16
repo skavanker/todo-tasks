@@ -8,13 +8,14 @@ Your markdown TODO file maps directly to Google Tasks:
 
 | Markdown | Google Tasks |
 |----------|-------------|
-| `## Heading` | Parent task (section) |
-| `- [ ] Task` | Subtask |
-| `- [x] Task` | Completed → deleted |
+| `## Heading` | Task list section |
+| `- [ ] Task` | Task |
+| `- [x] Task` | Completed (kept by default) |
+| Indented text under task | Task notes/description |
 | `(date: 03-15)` | Due date (current year) |
 | `(date: 2027-03-15)` | Due date (explicit year) |
 
-One task list is created per project. Headings become parent tasks, and items underneath become subtasks.
+One task list is created per project. Headings become sections, and checkbox items become tasks. The parser handles `*`, `+`, and `-` list markers, `[X]` (uppercase), indented items, and files with no headings.
 
 ### Fuzzy matching
 
@@ -48,8 +49,6 @@ You need your own Google Cloud credentials to use todo-tasks.
 4. On the **Scopes** page, add `https://www.googleapis.com/auth/tasks`
 5. On the **Test users** page, add your Google email address
 
-> **Note:** While your app is in "Testing" mode, only test users you add can authenticate. This is fine for personal use. Publishing the app removes this restriction but requires Google verification.
-
 ### 3. Create credentials
 
 1. Go to APIs & Services → Credentials → Create Credentials → **OAuth client ID**
@@ -80,9 +79,43 @@ todo-tasks sync --file path/to/TODO.md
 
 # Add a task to a Google Tasks list
 todo-tasks add "Buy groceries" --list "Home"
+
+# Show all your Google Tasks lists
+todo-tasks lists
+
+# Create a new Google Tasks list
+todo-tasks create-list "Shopping"
 ```
 
 By default, the tool looks for `docs/TODO.md` then `TODO.md` in the current directory.
+
+## Claude Code integration
+
+If you use [Claude Code](https://claude.ai/code), you can install a `/todo` skill:
+
+```bash
+todo-tasks setup claude
+```
+
+This gives you quick commands like:
+- `/todo buy milk in Home` — add a task
+- `/todo sync` — sync TODO.md
+- `/todo lists` — show all lists
+- `/todo create list Shopping` — create a new list
+
+## Configuration
+
+Add HTML comments at the top of your TODO.md to configure behavior:
+
+```markdown
+<!-- todo-tasks list: My Project -->
+<!-- todo-tasks completed: delete -->
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `list` | Folder name | Custom Google Tasks list name |
+| `completed` | `keep` | `keep` preserves completed tasks, `delete` removes them from both sides |
 
 ## How sync works
 
@@ -92,7 +125,7 @@ todo-tasks uses a mapping file as the "last known state" to determine what chang
 - **New remotely** (in Google Tasks but not mapping) → added to TODO.md
 - **Deleted locally** → deleted from Google Tasks
 - **Deleted remotely** → removed from TODO.md
-- **Completed** (either side) → deleted from both
+- **Completed** (either side) → kept as `[x]` (default) or deleted with config
 - **Renamed** (fuzzy match) → updated on the other side
 
 Mapping files are stored in `~/.todo-tasks/mappings/` (one per project, based on the file path).

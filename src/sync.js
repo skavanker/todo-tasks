@@ -1,10 +1,10 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile as _readFile, writeFile as _writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync as _existsSync } from 'node:fs';
 import { parse } from './parser.js';
 import { format } from './formatter.js';
-import { loadMapping, saveMapping, itemHash } from './mapping.js';
-import * as api from './tasks-api.js';
+import { loadMapping as _loadMapping, saveMapping as _saveMapping, itemHash } from './mapping.js';
+import * as _api from './tasks-api.js';
 import { fuzzyMatch } from './fuzzy.js';
 
 /**
@@ -28,7 +28,7 @@ function isNotFound(err) {
  * Fetches remote state from Google Tasks and returns structured sections.
  * Also returns the raw parent→children map for ID lookups.
  */
-async function fetchRemote(auth, taskListId) {
+async function fetchRemote(api, auth, taskListId) {
   const tasks = await api.getTasks(auth, taskListId);
 
   const children = new Map();
@@ -45,6 +45,16 @@ async function fetchRemote(auth, taskListId) {
   return { topLevel, children };
 }
 
+/** Default dependencies — real implementations. */
+const defaultDeps = {
+  api: _api,
+  loadMapping: _loadMapping,
+  saveMapping: _saveMapping,
+  readFile: _readFile,
+  writeFile: _writeFile,
+  existsSync: _existsSync,
+};
+
 /**
  * Sync: Two-way sync between TODO.md and Google Tasks.
  *
@@ -55,19 +65,25 @@ async function fetchRemote(auth, taskListId) {
  * - In mapping but not Google Tasks → deleted remotely → remove from TODO.md
  * - Completed (either side) → delete from both
  */
-export async function sync(auth, filePath) {
+export async function sync(auth, filePath, deps = {}) {
+  const { api, loadMapping, saveMapping, readFile, writeFile, existsSync } = { ...defaultDeps, ...deps };
+
   const mapping = await loadMapping(filePath);
 
   // Read local TODO.md (empty if file doesn't exist yet)
   let localSections = [];
+  let config = {};
   if (existsSync(filePath)) {
     const content = await readFile(filePath, 'utf-8');
-    localSections = parse(content);
+    const parsed = parse(content);
+    localSections = parsed.sections;
+    config = parsed.config;
   }
 
   // Ensure we have a task list
+  const listName = config.list || projectName(filePath);
   if (!mapping.taskListId) {
-    const taskList = await api.createTaskList(auth, projectName(filePath));
+    const taskList = await api.createTaskList(auth, listName);
     mapping.taskListId = taskList.id;
   }
   if (!mapping.sections) mapping.sections = {};
@@ -75,13 +91,13 @@ export async function sync(auth, filePath) {
   // Fetch remote state — if task list was deleted, reset and create a new one
   let topLevel, children;
   try {
-    ({ topLevel, children } = await fetchRemote(auth, mapping.taskListId));
+    ({ topLevel, children } = await fetchRemote(api, auth, mapping.taskListId));
   } catch (err) {
     if (!isNotFound(err)) throw err;
-    const taskList = await api.createTaskList(auth, projectName(filePath));
+    const taskList = await api.createTaskList(auth, listName);
     mapping.taskListId = taskList.id;
     mapping.sections = {};
-    ({ topLevel, children } = await fetchRemote(auth, mapping.taskListId));
+    ({ topLevel, children } = await fetchRemote(api, auth, mapping.taskListId));
   }
 
   // Build lookup maps
@@ -136,21 +152,24 @@ export async function sync(auth, filePath) {
 
     // --- Section-level logic ---
 
-    // Completed remotely → remove from mapping (cleared in bulk later)
+    // Completed remotely
     if (remote && remote.status === 'completed') {
-      delete mapping.sections[heading];
-      stats.deleted++;
-      continue;
+      if (config.completed === 'delete') {
+        delete mapping.sections[heading];
+        stats.deleted++;
+        continue;
+      }
+      // Keep: section still appears in result (items handled below)
     }
 
     // In mapping but not local → deleted locally → delete from Google Tasks
     if (!local && mapped) {
       if (remote) {
-        // Delete children first
-        for (const child of (children.get(remote.id) || [])) {
-          try { await api.deleteTask(auth, mapping.taskListId, child.id); } catch {}
-        }
-        try { await api.deleteTask(auth, mapping.taskListId, remote.id); } catch {}
+        const deleteOps = (children.get(remote.id) || []).map(
+          (child) => api.deleteTask(auth, mapping.taskListId, child.id).catch((err) => { if (!isNotFound(err)) throw err; }),
+        );
+        await Promise.all(deleteOps);
+        try { await api.deleteTask(auth, mapping.taskListId, remote.id); } catch (err) { if (!isNotFound(err)) throw err; }
       }
       delete mapping.sections[heading];
       stats.deleted++;
@@ -229,38 +248,60 @@ export async function sync(auth, filePath) {
       ...mappedItems,
     ]);
 
+    // --- Classify items into buckets ---
     const resultItems = [];
+    const toDelete = [];
+    const toCreate = [];
+    const toComplete = [];
+    const toUpdate = [];
+    const toAddResult = [];
 
     for (const text of allItems) {
       const localItem = localItems.get(text);
       const remoteItem = remoteItems.get(text);
       const mappedItem = secMapping.items[text];
 
-      // Completed remotely → remove from mapping (cleared in bulk later)
+      const deleteCompleted = config.completed === 'delete';
+
+      // Completed remotely
       if (remoteItem && remoteItem.status === 'completed') {
-        delete secMapping.items[text];
-        stats.deleted++;
+        if (deleteCompleted) {
+          delete secMapping.items[text];
+          stats.deleted++;
+          continue;
+        }
+        resultItems.push({
+          text,
+          completed: true,
+          due: remoteItem.due || localItem?.due || null,
+          notes: remoteItem.notes || localItem?.notes || null,
+        });
         continue;
       }
 
-      // Completed locally → mark as completed remotely (cleared in bulk later)
+      // Completed locally → mark as completed remotely
       if (localItem && localItem.completed) {
         if (remoteItem) {
-          try {
-            await api.updateTask(auth, mapping.taskListId, remoteItem.id, {
-              status: 'completed',
-            });
-          } catch {}
+          toComplete.push({ remoteItem, text });
         }
-        delete secMapping.items[text];
-        stats.deleted++;
+        if (deleteCompleted) {
+          delete secMapping.items[text];
+          stats.deleted++;
+          continue;
+        }
+        resultItems.push({
+          text,
+          completed: true,
+          due: remoteItem?.due || localItem.due || null,
+          notes: localItem.notes || remoteItem?.notes || null,
+        });
         continue;
       }
 
       // In mapping but not local → deleted locally → delete remote
       if (!localItem && mappedItem) {
         if (remoteItem) {
-          try { await api.deleteTask(auth, mapping.taskListId, remoteItem.id); } catch {}
+          toDelete.push({ remoteItem, text });
         }
         delete secMapping.items[text];
         stats.deleted++;
@@ -275,25 +316,14 @@ export async function sync(auth, filePath) {
 
       // New locally → create in Google Tasks
       if (localItem && !remoteItem && !mappedItem) {
-        const task = await api.createTask(auth, mapping.taskListId, {
-          title: text,
-          status: 'needsAction',
-          due: localItem.due,
-          parent: remoteParentId,
-        });
-        secMapping.items[text] = {
-          taskId: task.id,
-          hash: itemHash(text, false),
-          status: 'needsAction',
-        };
-        stats.created++;
+        toCreate.push({ localItem, text, remoteParentId });
       }
 
       // New remotely → just add to mapping
       if (remoteItem && !localItem && !mappedItem) {
         secMapping.items[text] = {
           taskId: remoteItem.id,
-          hash: itemHash(text, false),
+          hash: itemHash(text, false, remoteItem.notes, remoteItem.due),
           status: remoteItem.status,
         };
         stats.created++;
@@ -301,39 +331,78 @@ export async function sync(auth, filePath) {
 
       // Exists on both → check for updates
       if (localItem && remoteItem && mappedItem) {
-        const hash = itemHash(text, false);
+        const notes = localItem.notes || remoteItem.notes || null;
+        const due = remoteItem.due || localItem.due || null;
+        const hash = itemHash(text, false, notes, due);
         if (mappedItem.hash !== hash) {
-          try {
-            await api.updateTask(auth, mapping.taskListId, remoteItem.id, {
-              title: text,
-              status: 'needsAction',
-              due: remoteItem.due,
-            });
-            mappedItem.hash = hash;
-            stats.updated++;
-          } catch (err) {
-            if (!isNotFound(err)) throw err;
-            // Stale ID — recreate as new task
-            const task = await api.createTask(auth, mapping.taskListId, {
-              title: text,
-              status: 'needsAction',
-              due: localItem.due,
-              parent: remoteParentId,
-            });
-            secMapping.items[text] = {
-              taskId: task.id,
-              hash: itemHash(text, false),
-              status: 'needsAction',
-            };
-            stats.created++;
-          }
+          toUpdate.push({ localItem, remoteItem, text, notes, due, hash, mappedItem, remoteParentId });
         }
       }
 
+      toAddResult.push({ text, remoteItem, localItem });
+    }
+
+    // --- Execute batched API calls ---
+    await Promise.all(toDelete.map(
+      ({ remoteItem }) => api.deleteTask(auth, mapping.taskListId, remoteItem.id).catch((err) => { if (!isNotFound(err)) throw err; }),
+    ));
+
+    await Promise.all(toComplete.map(
+      ({ remoteItem }) => api.updateTask(auth, mapping.taskListId, remoteItem.id, { status: 'completed' }).catch((err) => { if (!isNotFound(err)) throw err; }),
+    ));
+
+    // Creates are sequential — they depend on parent ID and ordering
+    for (const { localItem, text, remoteParentId: parentId } of toCreate) {
+      const task = await api.createTask(auth, mapping.taskListId, {
+        title: text,
+        status: 'needsAction',
+        due: localItem.due,
+        notes: localItem.notes,
+        parent: parentId,
+      });
+      secMapping.items[text] = {
+        taskId: task.id,
+        hash: itemHash(text, false, localItem.notes, localItem.due),
+        status: 'needsAction',
+      };
+      stats.created++;
+    }
+
+    await Promise.all(toUpdate.map(async ({ localItem, remoteItem, text, notes, due, hash, mappedItem, remoteParentId: parentId }) => {
+      try {
+        await api.updateTask(auth, mapping.taskListId, remoteItem.id, {
+          title: text,
+          status: 'needsAction',
+          due,
+          notes: notes || undefined,
+        });
+        mappedItem.hash = hash;
+        stats.updated++;
+      } catch (err) {
+        if (!isNotFound(err)) throw err;
+        // Stale ID — recreate as new task
+        const task = await api.createTask(auth, mapping.taskListId, {
+          title: text,
+          status: 'needsAction',
+          due: localItem.due,
+          notes: localItem.notes,
+          parent: parentId,
+        });
+        secMapping.items[text] = {
+          taskId: task.id,
+          hash: itemHash(text, false, localItem.notes, localItem.due),
+          status: 'needsAction',
+        };
+        stats.created++;
+      }
+    }));
+
+    for (const { text, remoteItem, localItem } of toAddResult) {
       resultItems.push({
         text,
         completed: false,
         due: remoteItem?.due || localItem?.due || null,
+        notes: remoteItem?.notes || localItem?.notes || null,
       });
     }
 
@@ -344,9 +413,9 @@ export async function sync(auth, filePath) {
     });
   }
 
-  // Clear all completed tasks in one API call
-  if (stats.deleted > 0) {
-    try { await api.clearCompleted(auth, mapping.taskListId); } catch {}
+  // Clear completed tasks from Google Tasks (only in delete mode)
+  if (stats.deleted > 0 && config.completed === 'delete') {
+    try { await api.clearCompleted(auth, mapping.taskListId); } catch (err) { if (!isNotFound(err)) throw err; }
   }
 
   // Safety check: don't wipe a non-empty file with empty results
@@ -355,7 +424,7 @@ export async function sync(auth, filePath) {
   }
 
   // Write updated TODO.md
-  await writeFile(filePath, format(resultSections));
+  await writeFile(filePath, format(resultSections, config));
   await saveMapping(filePath, mapping);
 
   const totalItems = resultSections.reduce((n, s) => n + s.items.length, 0);

@@ -3,8 +3,13 @@
  * Inverse of parser.js.
  */
 
-export function format(lists) {
+export function format(lists, config = {}) {
   const lines = [];
+
+  for (const [key, value] of Object.entries(config)) {
+    lines.push(`<!-- todo-tasks ${key}: ${value} -->`);
+  }
+  if (Object.keys(config).length > 0) lines.push('');
 
   for (const list of lists) {
     if (lines.length > 0) lines.push('');
@@ -14,6 +19,11 @@ export function format(lists) {
 
     for (const item of list.items) {
       lines.push(formatTask(item));
+      if (item.notes) {
+        for (const noteLine of item.notes.split('\n')) {
+          lines.push(`  ${noteLine}`);
+        }
+      }
     }
   }
 

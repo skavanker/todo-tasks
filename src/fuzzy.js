@@ -41,7 +41,7 @@ export function similarity(a, b) {
  * Returns an array of { local, remote, score } pairs above the threshold.
  * Uses greedy best-match-first strategy.
  */
-export function fuzzyMatch(localStrings, remoteStrings, threshold = 0.6) {
+export function fuzzyMatch(localStrings, remoteStrings, threshold = 0.7) {
   if (!localStrings.length || !remoteStrings.length) return [];
 
   // Build similarity matrix

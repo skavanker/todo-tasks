@@ -2,17 +2,24 @@
 
 import { Command } from 'commander';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { resolve, join, dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { authorize, getAuthClient } from '../src/auth.js';
 import { sync } from '../src/sync.js';
 import * as api from '../src/tasks-api.js';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
 
 const program = new Command();
 
 program
   .name('todo-tasks')
   .description('Sync TODO.md files with Google Tasks')
-  .version('0.1.0');
+  .version(version);
 
 /**
  * Finds the TODO.md file using discovery order:
@@ -109,6 +116,54 @@ program
       }
     } catch (err) {
       console.error('Failed:', err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('create-list')
+  .description('Create a new Google Tasks list')
+  .argument('<name>', 'List name')
+  .action(async (name) => {
+    try {
+      const auth = await getAuthClient();
+      const list = await api.createTaskList(auth, name);
+      console.log(`Created list: "${list.title}"`);
+    } catch (err) {
+      console.error('Failed:', err.message);
+      process.exit(1);
+    }
+  });
+
+const setup = program
+  .command('setup')
+  .description('Set up integrations with AI tools');
+
+setup
+  .command('claude')
+  .description('Install Claude Code skills for todo-tasks')
+  .action(async () => {
+    try {
+      const pkgDir = dirname(dirname(fileURLToPath(import.meta.url)));
+      const skillsSource = join(pkgDir, 'skills');
+      const skillsDest = join(homedir(), '.claude', 'skills');
+
+      const skills = await readdir(skillsSource);
+      for (const skill of skills) {
+        const srcDir = join(skillsSource, skill);
+        const destDir = join(skillsDest, skill);
+        await mkdir(destDir, { recursive: true });
+
+        const files = await readdir(srcDir);
+        for (const file of files) {
+          const content = await readFile(join(srcDir, file), 'utf-8');
+          await writeFile(join(destDir, file), content);
+        }
+        console.log(`Installed skill: /${skill}`);
+      }
+      console.log('\nDone! Skills are available in Claude Code.');
+    } catch (err) {
+      console.error('Setup failed:', err.message);
       process.exit(1);
     }
   });

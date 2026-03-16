@@ -13,6 +13,7 @@
  * ]
  */
 
+const CONFIG_RE = /^<!--\s*todo-tasks\s+(\w+):\s*(.+?)\s*-->$/;
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
 const TASK_RE = /^\s*[-*+]\s+\[([ xX])\]\s+(.+)$/;
 const DATE_RE = /\s*\(date:\s*(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}-\d{1,2})\)\s*/;
@@ -46,10 +47,17 @@ export function parse(markdown) {
     .replace(/\r\n?/g, '\n')  // Normalize line endings (CRLF and bare CR)
     .split('\n');
 
+  const config = {};
   const lists = [];
   let currentList = null;
 
   for (const line of lines) {
+    const configMatch = line.match(CONFIG_RE);
+    if (configMatch) {
+      config[configMatch[1]] = configMatch[2];
+      continue;
+    }
+
     const headingMatch = line.match(HEADING_RE);
     if (headingMatch) {
       const heading = headingMatch[2];
@@ -65,26 +73,35 @@ export function parse(markdown) {
     }
 
     const taskMatch = line.match(TASK_RE);
-    if (!taskMatch) continue;
+    if (taskMatch) {
+      const [, check, rawText] = taskMatch;
+      const text = stripMetadata(rawText);
 
-    const [, check, rawText] = taskMatch;
-    const text = stripMetadata(rawText);
+      // Skip tasks with empty text (e.g. just a date annotation)
+      if (!text) continue;
 
-    // Skip tasks with empty text (e.g. just a date annotation)
-    if (!text) continue;
+      // Default section for tasks before any heading
+      if (!currentList) {
+        currentList = { heading: 'Tasks', level: 2, items: [] };
+        lists.push(currentList);
+      }
 
-    // Default section for tasks before any heading
-    if (!currentList) {
-      currentList = { heading: 'Tasks', level: 2, items: [] };
-      lists.push(currentList);
+      currentList.items.push({
+        text,
+        completed: check === 'x' || check === 'X',
+        due: parseDate(rawText),
+        notes: null,
+      });
+      continue;
     }
 
-    currentList.items.push({
-      text,
-      completed: check === 'x' || check === 'X',
-      due: parseDate(rawText),
-    });
+    // Non-checkbox indented lines → notes for the previous task
+    if (currentList && currentList.items.length > 0 && /^\s+\S/.test(line)) {
+      const lastItem = currentList.items[currentList.items.length - 1];
+      const noteLine = line.trim();
+      lastItem.notes = lastItem.notes ? lastItem.notes + '\n' + noteLine : noteLine;
+    }
   }
 
-  return lists;
+  return { config, sections: lists };
 }

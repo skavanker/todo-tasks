@@ -45,7 +45,7 @@ async function loadToken() {
  * Starts a local HTTP server to receive the OAuth2 callback.
  * Returns a promise that resolves with the authorization code.
  */
-function waitForAuthCode() {
+function waitForAuthCode(timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
       const url = new URL(req.url, `http://localhost:${REDIRECT_PORT}`);
@@ -55,6 +55,7 @@ function waitForAuthCode() {
       if (error) {
         res.writeHead(400, { 'Content-Type': 'text/html' });
         res.end('<h1>Authorization failed</h1><p>You can close this window.</p>');
+        clearTimeout(timeout);
         server.close();
         reject(new Error(`Authorization denied: ${error}`));
         return;
@@ -63,13 +64,22 @@ function waitForAuthCode() {
       if (code) {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<h1>Authorization successful!</h1><p>You can close this window.</p>');
+        clearTimeout(timeout);
         server.close();
         resolve(code);
       }
     });
 
+    const timeout = setTimeout(() => {
+      server.close();
+      reject(new Error('Authorization timed out — no response after 2 minutes.'));
+    }, timeoutMs);
+
     server.listen(REDIRECT_PORT, () => {});
-    server.on('error', reject);
+    server.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
   });
 }
 

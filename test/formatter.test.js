@@ -58,11 +58,33 @@ describe('formatter', () => {
     assert.ok(!result.includes(String(year)));
   });
 
+  it('formats notes as indented lines', () => {
+    const data = [
+      {
+        heading: 'List',
+        level: 2,
+        items: [
+          { text: 'Task', completed: false, due: null, notes: 'Line one\nLine two' },
+        ],
+      },
+    ];
+    const result = format(data);
+    assert.ok(result.includes('- [ ] Task\n  Line one\n  Line two'));
+  });
+
+  it('roundtrips notes with parser', () => {
+    const original = '## List\n\n- [ ] Task\n  Some note\n  Another line\n';
+    const { sections } = parse(original);
+    const formatted = format(sections);
+    const { sections: reparsed } = parse(formatted);
+    assert.equal(reparsed[0].items[0].notes, 'Some note\nAnother line');
+  });
+
   it('roundtrips with parser', () => {
     const original = '## MVP\n\n- [ ] Task one\n- [x] Task two\n\n## Phase 2\n\n- [ ] With date (date: 2027-06-01)\n';
-    const parsed = parse(original);
+    const { sections: parsed } = parse(original);
     const formatted = format(parsed);
-    const reparsed = parse(formatted);
+    const { sections: reparsed } = parse(formatted);
 
     assert.equal(reparsed.length, parsed.length);
     assert.equal(reparsed[0].items.length, parsed[0].items.length);
