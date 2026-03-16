@@ -10,8 +10,8 @@ describe('formatter', () => {
         heading: 'MVP',
         level: 2,
         items: [
-          { text: 'Task one', completed: false, due: null, subtasks: [] },
-          { text: 'Task two', completed: true, due: null, subtasks: [] },
+          { text: 'Task one', completed: false, due: null,  },
+          { text: 'Task two', completed: true, due: null,  },
         ],
       },
     ];
@@ -28,34 +28,13 @@ describe('formatter', () => {
     assert.ok(!result.includes('## Title'));
   });
 
-  it('formats subtasks with indentation', () => {
-    const data = [
-      {
-        heading: 'List',
-        level: 2,
-        items: [
-          {
-            text: 'Parent',
-            completed: false,
-            due: null,
-            subtasks: [
-              { text: 'Child', completed: true, due: null, subtasks: [] },
-            ],
-          },
-        ],
-      },
-    ];
-    const result = format(data);
-    assert.ok(result.includes('  - [x] Child'));
-  });
-
   it('formats date with year', () => {
     const data = [
       {
         heading: 'List',
         level: 2,
         items: [
-          { text: 'Task', completed: false, due: '2027-03-15T00:00:00.000Z', subtasks: [] },
+          { text: 'Task', completed: false, due: '2027-03-15T00:00:00.000Z',  },
         ],
       },
     ];
@@ -70,7 +49,7 @@ describe('formatter', () => {
         heading: 'List',
         level: 2,
         items: [
-          { text: 'Task', completed: false, due: `${year}-06-01T00:00:00.000Z`, subtasks: [] },
+          { text: 'Task', completed: false, due: `${year}-06-01T00:00:00.000Z`,  },
         ],
       },
     ];

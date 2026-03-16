@@ -136,9 +136,8 @@ export async function sync(auth, filePath) {
 
     // --- Section-level logic ---
 
-    // Completed remotely → delete from both
+    // Completed remotely → remove from mapping (cleared in bulk later)
     if (remote && remote.status === 'completed') {
-      try { await api.deleteTask(auth, mapping.taskListId, remote.id); } catch {}
       delete mapping.sections[heading];
       stats.deleted++;
       continue;
@@ -237,18 +236,21 @@ export async function sync(auth, filePath) {
       const remoteItem = remoteItems.get(text);
       const mappedItem = secMapping.items[text];
 
-      // Completed remotely → delete
+      // Completed remotely → remove from mapping (cleared in bulk later)
       if (remoteItem && remoteItem.status === 'completed') {
-        try { await api.deleteTask(auth, mapping.taskListId, remoteItem.id); } catch {}
         delete secMapping.items[text];
         stats.deleted++;
         continue;
       }
 
-      // Completed locally → delete from Google Tasks
+      // Completed locally → mark as completed remotely (cleared in bulk later)
       if (localItem && localItem.completed) {
         if (remoteItem) {
-          try { await api.deleteTask(auth, mapping.taskListId, remoteItem.id); } catch {}
+          try {
+            await api.updateTask(auth, mapping.taskListId, remoteItem.id, {
+              status: 'completed',
+            });
+          } catch {}
         }
         delete secMapping.items[text];
         stats.deleted++;
@@ -332,7 +334,6 @@ export async function sync(auth, filePath) {
         text,
         completed: false,
         due: remoteItem?.due || localItem?.due || null,
-        subtasks: [],
       });
     }
 
@@ -341,6 +342,11 @@ export async function sync(auth, filePath) {
       level: local?.level || 2,
       items: resultItems,
     });
+  }
+
+  // Clear all completed tasks in one API call
+  if (stats.deleted > 0) {
+    try { await api.clearCompleted(auth, mapping.taskListId); } catch {}
   }
 
   // Safety check: don't wipe a non-empty file with empty results

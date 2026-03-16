@@ -88,3 +88,8 @@ export async function deleteTask(auth, taskListId, taskId) {
   const service = getService(auth);
   await service.tasks.delete({ tasklist: taskListId, task: taskId });
 }
+
+export async function clearCompleted(auth, taskListId) {
+  const service = getService(auth);
+  await service.tasks.clear({ tasklist: taskListId });
+}

@@ -1,6 +1,6 @@
 {
   "name": "@skavanker/todo-tasks",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "CLI tool that syncs TODO.md files with Google Tasks",
   "type": "module",
   "bin": {

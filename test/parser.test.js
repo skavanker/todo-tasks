@@ -26,12 +26,70 @@ describe('parser', () => {
     assert.equal(result[0].items[1].completed, true);
   });
 
-  it('parses subtasks (indented items)', () => {
+  it('parses indented items as flat tasks', () => {
     const result = parse('## List\n- [ ] Parent\n  - [ ] Child one\n  - [x] Child two');
+    assert.equal(result[0].items.length, 3);
+    assert.equal(result[0].items[0].text, 'Parent');
+    assert.equal(result[0].items[1].text, 'Child one');
+    assert.equal(result[0].items[2].completed, true);
+  });
+
+  it('parses uppercase X as completed', () => {
+    const result = parse('## List\n- [X] Done task');
+    assert.equal(result[0].items[0].completed, true);
+  });
+
+  it('parses * and + list markers', () => {
+    const result = parse('## List\n* [ ] Star task\n+ [ ] Plus task\n- [ ] Dash task');
+    assert.equal(result[0].items.length, 3);
+    assert.equal(result[0].items[0].text, 'Star task');
+    assert.equal(result[0].items[1].text, 'Plus task');
+    assert.equal(result[0].items[2].text, 'Dash task');
+  });
+
+  it('creates default section for tasks without headings', () => {
+    const result = parse('- [ ] Task one\n- [ ] Task two');
+    assert.equal(result.length, 1);
+    assert.equal(result[0].heading, 'Tasks');
+    assert.equal(result[0].items.length, 2);
+  });
+
+  it('handles BOM at start of file', () => {
+    const result = parse('\uFEFF## List\n- [ ] Task');
+    assert.equal(result.length, 1);
+    assert.equal(result[0].heading, 'List');
+  });
+
+  it('handles CRLF line endings', () => {
+    const result = parse('## List\r\n- [ ] Task one\r\n- [x] Task two');
+    assert.equal(result[0].items.length, 2);
+  });
+
+  it('handles bare CR line endings', () => {
+    const result = parse('## List\r- [ ] Task');
     assert.equal(result[0].items.length, 1);
-    assert.equal(result[0].items[0].subtasks.length, 2);
-    assert.equal(result[0].items[0].subtasks[0].text, 'Child one');
-    assert.equal(result[0].items[0].subtasks[1].completed, true);
+  });
+
+  it('strips trailing hashes from headings', () => {
+    const result = parse('## Heading ##\n- [ ] Task');
+    assert.equal(result[0].heading, 'Heading');
+  });
+
+  it('merges duplicate headings', () => {
+    const result = parse('## List\n- [ ] Task one\n\n## List\n- [ ] Task two');
+    assert.equal(result.length, 1);
+    assert.equal(result[0].items.length, 2);
+  });
+
+  it('skips tasks with empty text', () => {
+    const result = parse('## List\n- [ ] (date: 03-15)');
+    assert.equal(result[0].items.length, 0);
+  });
+
+  it('parses single-digit dates', () => {
+    const result = parse('## List\n- [ ] Task (date: 3-5)');
+    const year = new Date().getFullYear();
+    assert.ok(result[0].items[0].due.startsWith(`${year}-03-05`));
   });
 
   it('parses date with year', () => {
@@ -49,9 +107,10 @@ describe('parser', () => {
     assert.ok(task.due.startsWith(`${year}-03-15`));
   });
 
-  it('ignores lines before first heading', () => {
+  it('ignores non-checkbox lines before first heading', () => {
     const result = parse('Some intro text\n\n## List\n- [ ] Task');
     assert.equal(result.length, 1);
+    assert.equal(result[0].heading, 'List');
     assert.equal(result[0].items.length, 1);
   });
 

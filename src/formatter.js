@@ -13,11 +13,7 @@ export function format(lists) {
     lines.push('');
 
     for (const item of list.items) {
-      lines.push(formatTask(item, 0));
-
-      for (const sub of item.subtasks) {
-        lines.push(formatTask(sub, 1));
-      }
+      lines.push(formatTask(item));
     }
   }
 
@@ -38,9 +34,8 @@ function formatDate(due) {
   return ` (date: ${year}-${month}-${day})`;
 }
 
-function formatTask(task, depth) {
-  const indent = '  '.repeat(depth);
+function formatTask(task) {
   const check = task.completed ? 'x' : ' ';
   const date = formatDate(task.due);
-  return `${indent}- [${check}] ${task.text}${date}`;
+  return `- [${check}] ${task.text}${date}`;
 }
